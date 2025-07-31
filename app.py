@@ -1,35 +1,71 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, render_template_string
 import joblib
 import numpy as np
 
 app = Flask(__name__)
 
-# Load the model and scaler
-model = joblib.load("xgboost_fraud_model.pkl")
-scaler = joblib.load("scaler.pkl")
+# Load model and scaler
+model = joblib.load("xgboost_fraud_model.joblib")
+scaler = joblib.load("scaler.joblib")
 
-# Feature order
-FEATURES = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10',
-            'V11', 'V12', 'V13', 'V14', 'V15', 'V16', 'V17', 'V18', 'V19',
-            'V20', 'V21', 'V22', 'V23', 'V24', 'V25', 'V26', 'V27', 'V28', 'Amount']
+HTML_TEMPLATE = '''
+<!doctype html>
+<html>
+<head>
+    <title>Credit Card Fraud Detection</title>
+</head>
+<body>
+    <h2>💳 Credit Card Fraud Detection</h2>
+    <form method="POST" action="/predict">
+        {% for i in range(1, 29) %}
+            V{{ i }}: <input type="text" name="V{{ i }}" value="{{ values['V' ~ i] }}"><br><br>
+        {% endfor %}
+        Amount: <input type="text" name="Amount" value="{{ values['Amount'] }}"><br><br>
+        <input type="submit" value="Check">
+    </form>
 
-@app.route("/predict", methods=["POST"])
+    {% if prediction is not none %}
+        <h3>🔍 Prediction: {{ 'Fraudulent' if prediction == 1 else 'Not Fraudulent' }}</h3>
+    {% endif %}
+</body>
+</html>
+'''
+
+@app.route('/')
+def home():
+    # Initialize with empty strings for each field
+    values = {f'V{i}': '' for i in range(1, 29)}
+    values['Amount'] = ''
+    return render_template_string(HTML_TEMPLATE, prediction=None, values=values)
+
+@app.route('/predict', methods=['POST'])
 def predict():
     try:
-        data = request.json
-        input_data = np.array([data[feature] for feature in FEATURES]).reshape(1, -1)
-        input_scaled = scaler.transform(input_data)
-        prob = model.predict_proba(input_scaled)[0][1]
-        is_fraud = prob >= 0.5
+        # Get form values safely
+        values = {f'V{i}': request.form.get(f'V{i}', '').strip() for i in range(1, 29)}
+        values['Amount'] = request.form.get('Amount', '').strip()
 
-        return jsonify({
-            "is_fraud": bool(is_fraud),
-            "confidence": round(float(prob), 4)
-        })
+        # Convert to float
+        try:
+            features = [float(values[f'V{i}']) for i in range(1, 29)]
+            features.append(float(values['Amount']))
+        except ValueError:
+            return render_template_string(HTML_TEMPLATE, prediction=None, values=values) + "<p style='color:red;'>❌ Please enter valid numbers for all fields.</p>"
+
+        # Model prediction
+        data = np.array(features).reshape(1, -1)
+        data_scaled = scaler.transform(data)
+        prediction = int(model.predict(data_scaled)[0])
+
+        return render_template_string(HTML_TEMPLATE, prediction=prediction, values=values)
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return f"<h3>🚨 Error: {str(e)}</h3>"
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)
+
+
+
+
 
